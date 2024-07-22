@@ -1,0 +1,80 @@
+with CTE as (
+	select
+	gpu.language,
+	gpu.age,
+	gpu.has_older_device_model,
+	gpu.game_name,
+	gp.user_id as user_id,
+	revenue_amount_usd,
+	payment_date,
+	sum(revenue_amount_usd) as mrr,
+	count ( distinct (gp.user_id)) as paid_users,
+	round(sum(revenue_amount_usd)/count (distinct (gp.user_id)),2) as URPPU
+	from project.games_payments gp 
+	left join project.games_paid_users gpu on gp.user_id = gpu.user_id
+	group by payment_date, gp.user_id,gpu.language, gpu.age, gpu.has_older_device_model, gpu.game_name,revenue_amount_usd
+),
+	CTE2 as (
+	select
+	user_id,
+	language,
+	age,
+	has_older_device_model,
+	game_name,
+	revenue_amount_usd,
+	paid_users,
+	payment_date,
+	mrr,
+	lag  (mrr) over (order by payment_date asc  )AS prev_mrr,
+	URPPU,
+	min (payment_date) over (partition by user_id) as first_payment_date,
+	max (payment_date) over (partition by user_id) as last_payment_date
+	from CTE
+	group by payment_date,mrr,paid_users, URPPU, user_id,language,age, has_older_device_model,game_name,revenue_amount_usd
+	order by payment_date
+)
+select
+CTE2.user_id,
+CTE2.language,
+CTE2.age,
+CTE2.has_older_device_model,
+CTE2.game_name,
+CTE2.revenue_amount_usd,
+CTE2.payment_date,
+CTE2.first_payment_date,
+CTE2.last_payment_date,
+CTE2.paid_users,
+CTE2.URPPU,
+CTE2.mrr,
+CTE2.prev_mrr,
+case when CTE2.mrr >= CTE2.prev_mrr
+then CTE2.mrr-CTE2.prev_mrr 
+else 0
+end as expansion_mrr,
+case when CTE2.mrr <= CTE2.prev_mrr
+then CTE2.mrr-CTE2.prev_mrr 
+else 0
+end as contraction_mrr,
+case when CTE2.payment_date = CTE2.first_payment_date
+then count (distinct(CTE2.paid_users))
+else 0
+end as new_paid_users,
+case when CTE2.payment_date = CTE2.first_payment_date
+then sum (CTE2.revenue_amount_usd)
+else 0
+end as new_mrr,
+case when CTE2.payment_date = CTE2.last_payment_date
+then count (distinct(CTE2.paid_users))
+else 0
+end as churned_users,
+case when CTE2.payment_date = CTE2.last_payment_date
+then sum (CTE2.revenue_amount_usd)
+else 0
+end as churned_revenue
+from CTE2 
+group by  CTE2.payment_date,CTE2.paid_users, CTE2.mrr, CTE2.prev_mrr, CTE2.URPPU, CTE2.user_id,CTE2.language, CTE2.age, CTE2.has_older_device_model, CTE2.game_name,first_payment_date,
+CTE2.last_payment_date,CTE2.revenue_amount_usd
+;
+
+
+
